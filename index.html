@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>글로벌 정착 에이전시: 인구 분포 시뮬레이션</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Pretendard:wght@400;600;800&display=swap');
+        body {
+            font-family: 'Pretendard', -apple-system, sans-serif;
+            background-color: #f3f4f6;
+            overflow-x: hidden;
+        }
+        .fade-in {
+            animation: fadeIn 0.5s ease-in-out;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .map-container {
+            position: relative;
+            width: 100%;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        /* 세계지도 SVG (간략화된 버전) */
+        .world-map {
+            width: 100%;
+            height: auto;
+            fill: #d1d5db;
+            stroke: #ffffff;
+            stroke-width: 1;
+        }
+        .population-dot {
+            position: absolute;
+            width: 12px;
+            height: 12px;
+            background-color: rgba(239, 68, 68, 0.8);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+            box-shadow: 0 0 10px rgba(239, 68, 68, 0.6);
+            animation: pulse 2s infinite;
+        }
+        @keyframes pulse {
+            0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7); }
+            70% { box-shadow: 0 0 0 10px rgba(239, 68, 68, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+        }
+        
+        /* 맵 상의 지역 위치 (대략적인 퍼센트 위치) */
+        /* A: 서유럽(온대/평야), B: 북아프리카(사막), C: 동남아시아(열대/평야), D: 북아메리카동부(산업), E: 티베트(고산) */
+    </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen flex flex-col">
+
+    <!-- Header -->
+    <header class="bg-blue-600 text-white p-4 shadow-md text-center">
+        <h1 class="text-2xl font-bold">🌍 글로벌 정착 에이전시</h1>
+        <p class="text-sm opacity-90">인물들의 조건에 맞는 최적의 정착지를 찾아주세요!</p>
+    </header>
+
+    <!-- Main Content -->
+    <main class="flex-grow flex items-center justify-center p-4">
+        
+        <!-- Start Screen -->
+        <div id="start-screen" class="max-w-md w-full bg-white rounded-2xl shadow-xl p-8 text-center fade-in">
+            <div class="text-5xl mb-4">🏠</div>
+            <h2 class="text-2xl font-bold mb-4">최고의 보금자리를 찾아라!</h2>
+            <p class="text-gray-600 mb-6 text-left leading-relaxed">
+                세계 인구는 기후, 지형 등 <b>자연환경</b>과 산업, 교통 등 <b>인문환경</b>에 따라 불균형하게 분포합니다.<br><br>
+                당신은 글로벌 정착 에이전트입니다. 다양한 의뢰인들의 요구사항(인물 카드)을 확인하고 가장 알맞은 지역을 추천해주세요.
+            </p>
+            <div class="mb-6 text-left">
+                <label for="class-code" class="block text-sm font-bold text-gray-700 mb-1">학급 코드 (멀티플레이)</label>
+                <input type="text" id="class-code" placeholder="예: 1학년3반 (선택사항)" class="w-full px-4 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <p class="text-xs text-gray-500 mt-1">같은 코드를 입력한 친구들의 결과가 세계 지도에 함께 누적되어 표시됩니다!</p>
+            </div>
+            <button onclick="startGame()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-xl transition duration-200">
+                시뮬레이션 시작하기
+            </button>
+        </div>
+
+        <!-- Game Screen -->
+        <div id="game-screen" class="max-w-4xl w-full hidden fade-in flex flex-col md:flex-row gap-6">
+            
+            <!-- Left: Person Card -->
+            <div class="md:w-1/3 flex flex-col gap-4">
+                <div class="bg-blue-50 border-2 border-blue-200 rounded-2xl p-6 shadow-md relative overflow-hidden">
+                    <div class="absolute top-0 right-0 bg-blue-600 text-white px-3 py-1 rounded-bl-lg text-sm font-bold">
+                        의뢰인 <span id="client-number">1</span>/<span id="client-total">10</span>
+                    </div>
+                    <div class="text-6xl mb-2 text-center" id="client-icon">👩‍🏫</div>
+                    <h3 class="text-xl font-bold text-center mb-2" id="client-name">김고은 (45세)</h3>
+                    <div class="bg-white rounded-lg p-3 text-sm text-gray-700 shadow-inner mb-3 h-24 flex items-center" id="client-desc">
+                        "중학생 아이가 두 명 있어요. 일년 내내 기후가 온난하고, 아이들 교육시설이 잘 갖추어진 평야 지역에서 살고 싶습니다."
+                    </div>
+                    <div class="flex flex-wrap gap-2 justify-center" id="client-tags">
+                        <span class="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full font-semibold">#온대기후</span>
+                        <span class="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full font-semibold">#교육시설</span>
+                    </div>
+                </div>
+
+                <!-- Progress -->
+                <div class="bg-white rounded-xl shadow-sm p-4 text-center">
+                    <p class="text-sm font-bold text-gray-500 mb-2">정착 성공률</p>
+                    <div class="w-full bg-gray-200 rounded-full h-2.5">
+                        <div class="bg-green-500 h-2.5 rounded-full transition-all duration-500" id="progress-bar" style="width: 0%"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right: Options -->
+            <div class="md:w-2/3 flex flex-col gap-4" id="options-container">
+                <!-- Options will be generated by JS -->
+            </div>
+        </div>
+
+        <!-- Result Screen -->
+        <div id="result-screen" class="max-w-4xl w-full hidden fade-in flex flex-col items-center">
+            <div class="bg-white rounded-2xl shadow-xl p-6 w-full mb-6 text-center">
+                <h2 class="text-2xl font-bold text-blue-800 mb-2">🎉 시뮬레이션 완료!</h2>
+                <p class="text-gray-600 mb-4">여러분과 같은 에이전트들의 선택이 모여 만들어진 <b>세계 인구 분포도</b>입니다.</p>
+                
+                <div class="map-container bg-[#e0f2fe] border border-blue-200 rounded-xl overflow-hidden relative p-0" id="map-container-wrapper">
+                    <!-- D3.js가 여기에 지도를 그립니다 -->
+                    <svg id="world-map-svg" viewBox="0 0 800 400" class="w-full h-auto block"></svg>
+                </div>
+                <div class="mt-3 flex justify-center gap-6 text-sm font-bold">
+                    <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-red-500 border border-white"></span> 내 선택</span>
+                    <span class="flex items-center gap-1"><span class="w-3 h-3 rounded-full bg-blue-500 opacity-60"></span> 학급 친구들 선택</span>
+                </div>
+            </div>
+
+            <div class="bg-yellow-50 border-l-4 border-yellow-400 p-4 rounded w-full">
+                <h3 class="font-bold text-lg mb-2">📚 학습 정리</h3>
+                <ul class="list-disc list-inside text-gray-700 space-y-1">
+                    <li>인구는 육지가 많은 <b>북반구</b>에 집중되어 있습니다.</li>
+                    <li>기후가 온화한 <b>중위도 지역</b>, 해발고도가 낮은 <b>평야나 해안 지역</b>에 많은 사람이 모여 삽니다.</li>
+                    <li>산업, 교통, 교육 등 <b>인문환경이 발달한 지역</b>에 인구 밀도가 높습니다.</li>
+                    <li>반대로 극지방, 사막, 고산 지대에는 인구가 희박합니다.</li>
+                </ul>
+            </div>
+            
+            <button onclick="location.reload()" class="mt-6 bg-gray-600 hover:bg-gray-700 text-white font-bold py-2 px-6 rounded-lg">
+                다시하기
+            </button>
+        </div>
+
+        <!-- Custom Modal for Feedback -->
+        <div id="modal" class="fixed inset-0 bg-black bg-opacity-50 hidden flex items-center justify-center z-50">
+            <div class="bg-white rounded-2xl p-6 max-w-sm w-full mx-4 transform transition-all scale-95" id="modal-content">
+                <div class="text-4xl text-center mb-4" id="modal-icon">✅</div>
+                <h3 class="text-xl font-bold text-center mb-2" id="modal-title">정답입니다!</h3>
+                <p class="text-gray-600 text-center mb-6" id="modal-text">설명 텍스트</p>
+                <button onclick="nextTurn()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 px-4 rounded-xl">
+                    다음 의뢰인 보기
+                </button>
+            </div>
+        </div>
+
+    </main>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, collection, addDoc, onSnapshot } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Firebase Setup
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'population-app';
+        let db = null;
+        let auth = null;
+        let currentUser = null;
+
+        async function initFirebase() {
+            if (typeof __firebase_config === 'undefined') return;
+            try {
+                const firebaseConfig = JSON.parse(__firebase_config);
+                const app = initializeApp(firebaseConfig);
+                db = getFirestore(app);
+                auth = getAuth(app);
+                
+                if (typeof __initial_auth_token !== 'undefined') {
+                    await signInWithCustomToken(auth, __initial_auth_token);
+                } else {
+                    await signInAnonymously(auth);
+                }
+                currentUser = auth.currentUser;
+            } catch (error) {
+                console.error("Firebase Auth Error:", error);
+            }
+        }
+        initFirebase();
+
+        // D3 Map Setup
+        const projection = d3.geoNaturalEarth1().scale(150).translate([400, 200]);
+        const path = d3.geoPath().projection(projection);
+        const svg = d3.select("#world-map-svg");
+
+        d3.json("https://raw.githubusercontent.com/holtzy/D3-graph-gallery/master/DATA/world.geojson").then(function(data){
+            svg.append("g")
+                .selectAll("path")
+                .data(data.features)
+                .join("path")
+                .attr("d", path)
+                .attr("fill", "#cbd5e1")
+                .attr("stroke", "#ffffff")
+                .attr("stroke-width", 0.5);
+        });
+
+        // 10 Clients Data (위도/경도 추가)
+        const clients = [
+            {
+                name: "김고은 (45세)", icon: "👩‍🏫",
+                desc: "중학생 아이가 두 명 있어요. 일년 내내 기후가 온난하고, 아이들 교육시설이 잘 갖추어진 넓은 평야 지역에서 살고 싶습니다.",
+                tags: ["#온대기후", "#교육시설", "#평야"], correctRegion: "A",
+                options: [
+                    { id: "A", name: "서유럽 A도시", desc: "사계절이 뚜렷하고 기후가 온화함. 교통과 교육시설이 밀집된 넓은 평야 지대.", tags: ["#온대", "#평야", "#교육발달"] },
+                    { id: "B", name: "북유럽 B마을", desc: "일년 내내 눈이 많아 사계절 내내 스키를 탈 수 있음. 산맥이 험준한 지형.", tags: ["#냉대", "#고산지대", "#관광"] },
+                    { id: "C", name: "북아프리카 C지역", desc: "비가 거의 오지 않아 매우 건조함. 대신 땅값이 매우 싸서 넓은 집을 지을 수 있음.", tags: ["#건조", "#사막", "#저렴한물가"] }
+                ],
+                feedback: {
+                    "A": "완벽한 선택입니다! 온화한 기후와 발달된 인문환경(교육)은 인구가 모여 살기 가장 좋은 조건입니다.",
+                    "B": "스키는 탈 수 있지만, 너무 춥고 험준해서 아이들이 학교 다니기 힘들어 결국 이사를 고민합니다.",
+                    "C": "땅은 넓지만 너무 덥고 건조해서 식수와 농작물을 구하기 어렵습니다."
+                },
+                mapDot: { lng: 5, lat: 48 } // 서유럽
+            },
+            {
+                name: "박농부 (50세)", icon: "👨‍🌾",
+                desc: "조상 대대로 벼농사를 지어왔습니다. 비가 넉넉하게 내리고, 농사짓기 좋은 해발고도가 낮은 비옥한 땅이 필요합니다.",
+                tags: ["#풍부한강수량", "#낮은해발고도", "#벼농사"], correctRegion: "C",
+                options: [
+                    { id: "A", name: "티베트 A고원", desc: "해발고도가 4,000m 이상으로 매우 높고 서늘한 바람이 부는 곳.", tags: ["#고산기후", "#서늘함"] },
+                    { id: "B", name: "중앙아시아 B초원", desc: "강수량이 적어 나무가 자라기 힘들며, 양이나 말을 키우기 좋은 넓은 초원.", tags: ["#건조기후", "#유목"] },
+                    { id: "C", name: "동남아시아 C하구", desc: "비가 많이 내리고 계절풍이 불며, 큰 강 하류에 위치한 넓고 비옥한 평야.", tags: ["#열대/온대기후", "#충적평야", "#농업"] }
+                ],
+                feedback: {
+                    "A": "해발고도가 너무 높아 산소가 부족하고 기온이 낮아 벼농사를 지을 수 없습니다.",
+                    "B": "강수량이 적어 벼농사에 필요한 물을 구하기 어렵습니다. 여기선 유목을 해야 합니다.",
+                    "C": "탁월한 선택입니다! 풍부한 강수와 하천 주변의 평야는 벼농사에 적합하여 아시아 지역에 인구가 밀집하는 큰 이유입니다."
+                },
+                mapDot: { lng: 105, lat: 15 } // 동남아
+            },
+            {
+                name: "이테크 (28세)", icon: "👩‍💻",
+                desc: "첨단 IT 산업단지에서 일하고 싶어요. 출퇴근을 위한 교통망이 잘 갖추어져 있고 일자리와 상업 시설이 많은 곳이면 좋겠습니다.",
+                tags: ["#첨단산업", "#교통망", "#일자리"], correctRegion: "B",
+                options: [
+                    { id: "A", name: "아마존 A밀림", desc: "다양한 동식물이 사는 울창한 열대 우림 지역. 공기가 매우 맑음.", tags: ["#열대우림", "#자연친화"] },
+                    { id: "B", name: "북아메리카 동부 B도시", desc: "도로, 철도, 항만이 발달하고 수많은 첨단 기업과 상업 시설이 모여있는 대도시.", tags: ["#산업발달", "#교통편리", "#밀집"] },
+                    { id: "C", name: "시베리아 C벌판", desc: "매우 춥지만 지하 자원(천연가스 등)이 풍부하게 묻혀있는 넓은 지역.", tags: ["#냉대기후", "#지하자원"] }
+                ],
+                feedback: {
+                    "A": "자연은 아름답지만, 산업 및 교통 시설(인문환경)이 부족하여 IT 기업에서 일하기 어렵습니다.",
+                    "B": "정답입니다! 현대 사회에서는 자연환경뿐만 아니라 산업, 교통과 같은 '인문환경'이 인구 집중의 강력한 원인이 됩니다.",
+                    "C": "너무 추운 기후 때문에 교통망 건설이 어렵고 첨단 산업보다는 자원 채굴 위주로 발달한 곳입니다."
+                },
+                mapDot: { lng: -75, lat: 40 } // 북미동부
+            },
+            {
+                name: "최목동 (35세)", icon: "🏇",
+                desc: "비를 구경하기 힘들 정도로 건조한 곳에서 자랐어요. 넓은 초원에서 말과 양을 키우며 유목 생활을 이어가고 싶습니다.",
+                tags: ["#건조기후", "#초원", "#유목"], correctRegion: "B",
+                options: [
+                    { id: "A", name: "동아시아 A해안", desc: "여름에 비가 집중적으로 내리며 태풍이 자주 오는 인구 밀집 해안가.", tags: ["#계절풍", "#인구밀집"] },
+                    { id: "B", name: "중앙아시아 B초원", desc: "강수량이 적어 농사 짓기는 어렵지만, 짧은 풀이 넓게 자라는 초원 지대.", tags: ["#스텝기후", "#유목생활"] },
+                    { id: "C", name: "그린란드 C빙하", desc: "일년 내내 두꺼운 얼음으로 덮여 있는 극한의 추위를 가진 지역.", tags: ["#한대기후", "#빙설"] }
+                ],
+                feedback: {
+                    "A": "강수량이 너무 많아 풀이 자라기보다 숲이 우거지거나 농경지가 되어 유목에 적합하지 않습니다.",
+                    "B": "정답입니다! 강수량이 적어 농업이 힘든 건조 기후에서는 가축을 이끌고 이동하는 유목을 하며 소수의 인구가 살아갑니다.",
+                    "C": "풀조차 자라지 않는 빙하 지역이라 가축을 키울 수 없습니다."
+                },
+                mapDot: { lng: 65, lat: 45 } // 중앙아시아
+            },
+            {
+                name: "린다 (40세)", icon: "🏖️",
+                desc: "여름엔 덥고 건조하지만, 겨울엔 따뜻하고 비가 살짝 내리는 곳이 좋아요. 올리브 농사도 짓고 휴양객을 상대로 펜션을 하고 싶습니다.",
+                tags: ["#온난한겨울", "#관광휴양", "#올리브"], correctRegion: "A",
+                options: [
+                    { id: "A", name: "남유럽 지중해 A연안", desc: "여름엔 맑고 건조하며, 겨울엔 온화한 기후. 아름다운 해변으로 관광객이 많음.", tags: ["#지중해성기후", "#휴양지"] },
+                    { id: "B", name: "사하라 B사막", desc: "일년 내내 비가 내리지 않고 낮에는 50도까지 올라가는 뜨거운 모래 사막.", tags: ["#열대사막", "#극한더위"] },
+                    { id: "C", name: "히말라야 C산맥", desc: "해발고도가 매우 높아 일년 내내 눈이 녹지 않는 만년설이 있음.", tags: ["#고산기후", "#만년설"] }
+                ],
+                feedback: {
+                    "A": "완벽합니다! 온화한 지중해성 기후는 인간이 활동하기 매우 좋아 예로부터 인구가 밀집하고 문명이 발달한 곳입니다.",
+                    "B": "너무 덥고 건조해 식수를 구하기 힘들고 관광객이 찾아오기도 위험합니다.",
+                    "C": "올리브 농사는 커녕 숨쉬기도 힘든 고산지대라 사람이 모여 살기 어렵습니다."
+                },
+                mapDot: { lng: 15, lat: 38 } // 남유럽
+            },
+            {
+                name: "왕상인 (60세)", icon: "🚢",
+                desc: "전 세계를 상대로 무역을 하며 큰 돈을 벌고 싶소. 항구가 있고 상업이 크게 발달하여 수많은 사람들이 붐비는 대도시가 필요하오.",
+                tags: ["#항구도시", "#상업발달", "#인구밀집"], correctRegion: "C",
+                options: [
+                    { id: "A", name: "고비 A사막", desc: "아시아 내륙 깊숙한 곳에 위치한 거대한 사막. 교통이 매우 불편함.", tags: ["#내륙건조", "#교통불편"] },
+                    { id: "B", name: "알프스 B산맥", desc: "경치가 아름다운 험준한 산악 지대. 작은 마을들이 띄엄띄엄 있음.", tags: ["#산악지형", "#관광업"] },
+                    { id: "C", name: "중국 동부 C해안", desc: "거대한 강이 바다로 흘러드는 하구 평야로, 거대한 항구와 상업 시설이 밀집함.", tags: ["#해안평야", "#무역중심지"] }
+                ],
+                feedback: {
+                    "A": "바다와 멀리 떨어져 있고 교통이 불편하여 무역을 하기에 최악의 장소입니다.",
+                    "B": "경치는 좋지만 험준한 산맥 때문에 대규모 항구나 상업 도시가 발달하기엔 지형적 한계가 큽니다.",
+                    "C": "정답입니다! 지형이 평탄하고 바다와 맞닿아 교통이 편리한 해안가는 전 세계 인구가 가장 많이 모여 사는 곳입니다."
+                },
+                mapDot: { lng: 120, lat: 31 } // 중국동부
+            },
+            {
+                name: "호세 (25세)", icon: "☕",
+                desc: "적도 근처라 너무 더운 건 싫어요. 해발고도가 높아서 일년 내내 봄처럼 서늘한 기후에서 최고급 커피 농사를 짓고 싶습니다.",
+                tags: ["#열대고산", "#상춘기후", "#커피농사"], correctRegion: "A",
+                options: [
+                    { id: "A", name: "안데스 A고산도시", desc: "적도 부근이지만 해발고도가 2,000m 이상 높아 일년 내내 서늘한 봄 날씨.", tags: ["#고산기후", "#서늘함"] },
+                    { id: "B", name: "사우디아라비아 B사막", desc: "낮에는 몹시 뜨겁고 밤에는 차가운 모래 사막.", tags: ["#건조기후", "#일교차"] },
+                    { id: "C", name: "호주 내륙 C사막", desc: "비가 오지 않고 뜨거운 햇빛이 내리쬐는 척박한 오지.", tags: ["#아열대사막", "#건조함"] }
+                ],
+                feedback: {
+                    "A": "탁월한 선택! 열대 지역은 너무 덥기 때문에, 오히려 해발고도가 높아 서늘한 고산지대에 도시가 발달하고 사람들이 모여 삽니다.",
+                    "B": "더위와 물 부족으로 커피를 키울 수 없습니다.",
+                    "C": "기후가 너무 건조하여 농업이 불가능한 지역입니다."
+                },
+                mapDot: { lng: -75, lat: -10 } // 안데스
+            },
+            {
+                name: "스미스 (55세)", icon: "⛏️",
+                desc: "춥고 척박한 곳이라도 상관없어! 천연가스와 석유 같은 엄청난 지하 자원을 캐내어 떼돈을 벌고 싶다네.",
+                tags: ["#극한추위", "#지하자원", "#광업"], correctRegion: "C",
+                options: [
+                    { id: "A", name: "오세아니아 A사막", desc: "매우 덥고 비가 오지 않는 사막. 철광석이 일부 있음.", tags: ["#사막", "#광업"] },
+                    { id: "B", name: "아프리카 B우림", desc: "비가 엄청나게 내리고 울창한 나무들로 덮인 열대 우림.", tags: ["#열대우림", "#벌목"] },
+                    { id: "C", name: "시베리아 C툰드라", desc: "일년 내내 땅이 얼어있고 몹시 춥지만, 석유와 천연가스가 대량 매장됨.", tags: ["#한대기후", "#자원개발"] }
+                ],
+                feedback: {
+                    "A": "덥고 건조해 살기 힘들고, 스미스가 원하는 석유/가스 자원보다는 철광석 위주입니다.",
+                    "B": "울창한 밀림이라 접근이 어렵고 대규모 굴착 공사를 하기엔 기후가 너무 습합니다.",
+                    "C": "정답입니다! 자연환경이 매우 혹독하여 본래 사람이 살지 않던 곳도 '지하자원 개발(인문환경)'이라는 목적 때문에 인구가 유입되기도 합니다."
+                },
+                mapDot: { lng: 90, lat: 60 } // 시베리아
+            },
+            {
+                name: "파티마 (30세)", icon: "🌴",
+                desc: "사막에 살지만 우리 마을엔 마르지 않는 거대한 강이 흐른답니다. 강물을 끌어와 대추야자 농사를 지을 넓은 평야가 필요해요.",
+                tags: ["#건조사막", "#거대한강", "#관개농업"], correctRegion: "B",
+                options: [
+                    { id: "A", name: "아마존 A강 유역", desc: "강물은 많지만 밀림이 너무 우거져서 농경지를 개간하기 힘든 열대 우림.", tags: ["#열대우림", "#개간어려움"] },
+                    { id: "B", name: "나일강 B하류", desc: "주변은 척박한 사막이지만, 큰 강이 흘러들어 강 주변으로 비옥한 농경지가 길게 펼쳐짐.", tags: ["#사막기후", "#오아시스농업"] },
+                    { id: "C", name: "티베트 C고원", desc: "서늘하고 춥기 때문에 대추야자 같은 고온 건조성 작물이 자라지 못함.", tags: ["#고산기후", "#서늘함"] }
+                ],
+                feedback: {
+                    "A": "강은 크지만 사막성 작물인 대추야자를 기르기엔 기후가 맞지 않고 농경지 확보가 힘듭니다.",
+                    "B": "정답! 사막 한가운데라도 물을 구할 수 있는 하천이나 오아시스 주변에는 사람들이 빽빽하게 모여 살아 인구 밀도가 매우 높습니다.",
+                    "C": "너무 추워서 파티마가 원하는 농작물이 모두 얼어 죽습니다."
+                },
+                mapDot: { lng: 31, lat: 30 } // 이집트
+            },
+            {
+                name: "굽타 (22세)", icon: "🍛",
+                desc: "여름엔 무척 덥고 습해서 비가 쏟아져요. 엄청나게 넓은 평야에서 벼농사를 지어 수많은 가족들을 먹여 살려야 합니다.",
+                tags: ["#고온다습", "#넓은평야", "#거대인구"], correctRegion: "A",
+                options: [
+                    { id: "A", name: "인도 북부 A평야", desc: "덥고 습한 계절풍이 불며, 거대한 강이 만든 엄청나게 넓고 비옥한 충적 평야.", tags: ["#계절풍", "#인구폭발"] },
+                    { id: "B", name: "캐나다 북부 B지방", desc: "땅은 넓지만 춥고 척박하여 농사 지을 기간이 거의 없는 타이가(침엽수림) 지대.", tags: ["#냉대기후", "#농업불가"] },
+                    { id: "C", name: "호주 내륙 C사막", desc: "거대하고 평탄한 땅이지만 붉은 모래로 덮여있어 농작물이 자라지 못함.", tags: ["#건조사막", "#척박함"] }
+                ],
+                feedback: {
+                    "A": "정답입니다! 고온다습하고 비옥한 평야 지역은 벼농사를 통해 엄청난 식량을 생산할 수 있어 세계에서 인구가 가장 많이 모여 사는 곳(아시아)이 되었습니다.",
+                    "B": "농사를 지어 대가족을 부양하기엔 너무 춥고 기간이 짧습니다.",
+                    "C": "광활하지만 물이 없어 벼농사는 절대 불가능합니다."
+                },
+                mapDot: { lng: 80, lat: 26 } // 인도
+            }
+        ];
+
+        let currentTurn = 0;
+        let selectedDots = []; 
+        let currentClassCode = "";
+
+        window.startGame = function() {
+            currentClassCode = document.getElementById('class-code').value.trim();
+            document.getElementById('client-total').innerText = clients.length;
+            document.getElementById('start-screen').classList.add('hidden');
+            document.getElementById('game-screen').classList.remove('hidden');
+            loadClient(currentTurn);
+        };
+
+        function loadClient(index) {
+            const client = clients[index];
+            document.getElementById('client-number').innerText = index + 1;
+            document.getElementById('client-icon').innerText = client.icon;
+            document.getElementById('client-name').innerText = client.name;
+            document.getElementById('client-desc').innerText = `"${client.desc}"`;
+            
+            document.getElementById('client-tags').innerHTML = client.tags.map(tag => 
+                `<span class="bg-blue-100 text-blue-800 text-xs px-2 py-1 rounded-full font-semibold">${tag}</span>`
+            ).join('');
+
+            document.getElementById('progress-bar').style.width = `${(index / clients.length) * 100}%`;
+
+            const optionsContainer = document.getElementById('options-container');
+            optionsContainer.innerHTML = '';
+            
+            const shuffledOptions = [...client.options].sort(() => Math.random() - 0.5);
+
+            shuffledOptions.forEach(opt => {
+                const card = document.createElement('div');
+                card.className = "bg-white p-5 rounded-2xl shadow-sm border border-gray-200 hover:border-blue-500 hover:shadow-md transition cursor-pointer group";
+                card.onclick = () => window.selectOption(opt.id);
+                
+                const tagsHtml = opt.tags.map(tag => 
+                    `<span class="inline-block bg-gray-100 text-gray-600 text-xs px-2 py-1 rounded mr-1 mb-1 group-hover:bg-blue-50 group-hover:text-blue-600">${tag}</span>`
+                ).join('');
+
+                card.innerHTML = `
+                    <div class="flex justify-between items-center mb-2">
+                        <h4 class="text-lg font-bold text-gray-800 group-hover:text-blue-600">${opt.name}</h4>
+                        <span class="text-blue-500 opacity-0 group-hover:opacity-100 transition">선택하기 ➔</span>
+                    </div>
+                    <p class="text-gray-600 text-sm mb-3">${opt.desc}</p>
+                    <div>${tagsHtml}</div>
+                `;
+                optionsContainer.appendChild(card);
+            });
+        }
+
+        window.selectOption = function(optionId) {
+            const client = clients[currentTurn];
+            const isCorrect = (optionId === client.correctRegion);
+            
+            if (isCorrect) {
+                selectedDots.push(client.mapDot);
+            }
+
+            const modal = document.getElementById('modal');
+            const modalContent = document.getElementById('modal-content');
+            
+            document.getElementById('modal-icon').innerText = isCorrect ? "🎉" : "😅";
+            document.getElementById('modal-title').innerText = isCorrect ? "탁월한 선택입니다!" : "아쉬운 선택이네요.";
+            document.getElementById('modal-title').className = `text-xl font-bold text-center mb-2 ${isCorrect ? 'text-green-600' : 'text-orange-500'}`;
+            document.getElementById('modal-text').innerText = client.feedback[optionId];
+            
+            modal.classList.remove('hidden');
+            setTimeout(() => { modalContent.classList.remove('scale-95'); }, 10);
+        };
+
+        window.nextTurn = function() {
+            const modal = document.getElementById('modal');
+            const modalContent = document.getElementById('modal-content');
+            modalContent.classList.add('scale-95');
+            setTimeout(() => { modal.classList.add('hidden'); }, 200);
+
+            currentTurn++;
+            if (currentTurn < clients.length) {
+                loadClient(currentTurn);
+            } else {
+                showResult();
+            }
+        };
+
+        async function showResult() {
+            document.getElementById('game-screen').classList.add('hidden');
+            document.getElementById('result-screen').classList.remove('hidden');
+
+            // 플레이어의 점수 기록 표시
+            selectedDots.forEach((dot, index) => {
+                setTimeout(() => { drawDot(dot.lng, dot.lat, true); }, index * 300);
+            });
+
+            // Firebase에 저장하고 학급 전체 데이터 가져오기
+            if (currentClassCode && db && currentUser) {
+                try {
+                    const collectionRef = collection(db, 'artifacts', appId, 'public', 'data', 'class_' + currentClassCode);
+                    await addDoc(collectionRef, {
+                        userId: currentUser.uid,
+                        dots: selectedDots,
+                        timestamp: Date.now()
+                    });
+                    
+                    onSnapshot(collectionRef, (snapshot) => {
+                        svg.selectAll(".class-dot").remove();
+                        
+                        snapshot.forEach((doc) => {
+                            const data = doc.data();
+                            if (data.userId === currentUser.uid) return;
+                            
+                            data.dots.forEach(dot => {
+                                drawDot(dot.lng, dot.lat, false);
+                            });
+                        });
+                    });
+                } catch (e) {
+                    console.error("Firebase Sync Error", e);
+                }
+            } else if (!currentClassCode) {
+                // 학급 코드를 입력하지 않았을 경우 배경 점을 가상으로 생성 (효과용)
+                setTimeout(() => {
+                    const clusters = [ {lng: 110, lat: 30, s: 20}, {lng: 80, lat: 20, s: 15}, {lng: 10, lat: 50, s: 15}, {lng: -80, lat: 35, s: 15} ];
+                    clusters.forEach(c => {
+                        for(let i=0; i<8; i++) {
+                            setTimeout(() => {
+                                const jx = (Math.random() - 0.5) * c.s;
+                                const jy = (Math.random() - 0.5) * c.s;
+                                drawDot(c.lng + jx, c.lat + jy, false);
+                            }, i * 100);
+                        }
+                    });
+                }, selectedDots.length * 300 + 500);
+            }
+        }
+
+        function drawDot(lng, lat, isPlayer) {
+            const coords = projection([lng, lat]);
+            if (!coords) return;
+            
+            // 점들이 완벽하게 겹치지 않고 모여있는 모습을 위해 약간의 랜덤 위치 분산(Jitter)을 줍니다.
+            const jitterX = isPlayer ? 0 : (Math.random() - 0.5) * 15;
+            const jitterY = isPlayer ? 0 : (Math.random() - 0.5) * 15;
+
+            svg.append("circle")
+               .attr("class", isPlayer ? "my-dot" : "class-dot")
+               .attr("cx", coords[0] + jitterX)
+               .attr("cy", coords[1] + jitterY)
+               .attr("r", isPlayer ? 6 : 4)
+               .attr("fill", isPlayer ? "rgba(239, 68, 68, 0.9)" : "rgba(59, 130, 246, 0.5)")
+               .attr("stroke", isPlayer ? "white" : "none")
+               .attr("stroke-width", isPlayer ? 1 : 0)
+               .style("opacity", 0)
+               .transition()
+               .duration(500)
+               .style("opacity", 1)
+               .attr("r", isPlayer ? 7 : 4);
+        }
+    </script>
+</body>
+</html>
